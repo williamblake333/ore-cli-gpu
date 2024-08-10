@@ -1,3 +1,5 @@
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 use std::{sync::Arc, time::Instant};
 use std::sync::atomic::{AtomicU32, Ordering};
 
