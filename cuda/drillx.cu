@@ -8,7 +8,7 @@
 #include "equix/src/solver_heap.h"
 #include "hashx/src/context.h"
 
-const int BATCH_SIZE = 2048;
+const int BATCH_SIZE = 4096;
 
 #define CUDA_CHECK(call) \
     do { \
@@ -48,10 +48,12 @@ extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
         }
     }
 
-    dim3 threadsPerBlock(256);
-    dim3 blocksPerGrid((BATCH_SIZE * INDEX_SPACE + threadsPerBlock.x - 1) / threadsPerBlock.x);
+    dim3 threadsPerBlock(512);
+    dim3 blocksPerGrid((BATCH_SIZE + threadsPerBlock.x - 1) / threadsPerBlock.x);
     do_hash_stage0i<<<blocksPerGrid, threadsPerBlock>>>(ctxs, hash_space);
     CUDA_CHECK(cudaGetLastError()); // Check for launch errors
+
+    CUDA_CHECK(cudaDeviceSynchronize()); // Ensure all kernels are finished
 
     for (int i = 0; i < BATCH_SIZE; i++) {
         CUDA_CHECK(cudaMemcpy(out + i * INDEX_SPACE, hash_space[i], INDEX_SPACE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
@@ -92,10 +94,12 @@ extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols,
 
     CUDA_CHECK(cudaMemcpy(d_hashes, hashes, num_sets * INDEX_SPACE * sizeof(uint64_t), cudaMemcpyHostToDevice));
 
-    int threadsPerBlock = 256;
+    int threadsPerBlock = 512; // Consistency with the hash function
     int blocksPerGrid = (num_sets + threadsPerBlock - 1) / threadsPerBlock;
     solve_all_stages_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_hashes, d_heaps, d_solutions, d_num_sols);
     CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaDeviceSynchronize()); // Ensure all kernels are finished
 
     CUDA_CHECK(cudaMemcpy(h_solutions, d_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_num_sols, d_num_sols, num_sets * sizeof(uint32_t), cudaMemcpyDeviceToHost));
