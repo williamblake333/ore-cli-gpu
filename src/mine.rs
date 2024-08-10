@@ -1,6 +1,5 @@
-use std::{sync::Arc, time::Instant};
-use std::sync::atomic::{AtomicU32, Ordering};
-
+use std::{sync::{Arc, Mutex}, time::Instant};
+// Removed unused imports
 use colored::*;
 use drillx::{Hash, Solution};
 use ore_api::{
@@ -11,7 +10,7 @@ use rand::Rng;
 use solana_program::pubkey::Pubkey;
 use solana_rpc_client::spinner;
 use solana_sdk::signer::Signer;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 
 use crate::{
     args::MineArgs,
