@@ -48,8 +48,8 @@ extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
         }
     }
 
-    dim3 threadsPerBlock(512);
-    dim3 blocksPerGrid((BATCH_SIZE + threadsPerBlock.x - 1) / threadsPerBlock.x);
+    dim3 threadsPerBlock(1024);
+    dim3 blocksPerGrid((65536 * BATCH_SIZE + threadsPerBlock.x - 1) / threadsPerBlock.x);
     do_hash_stage0i<<<blocksPerGrid, threadsPerBlock>>>(ctxs, hash_space);
     CUDA_CHECK(cudaGetLastError()); // Check for launch errors
 
