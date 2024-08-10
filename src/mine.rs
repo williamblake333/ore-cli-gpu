@@ -1,10 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use colored::*;
-use drillx::{
-    Hash, Solution,
-};
-
+use drillx::{Hash, Solution};
 use ore_api::{
     consts::{BUS_ADDRESSES, BUS_COUNT, EPOCH_DURATION},
     state::{Config, Proof},
@@ -33,26 +30,18 @@ use rayon::prelude::*;
 
 impl Miner {
     pub async fn mine(&self, args: MineArgs) {
-        // Register, if needed.
         let signer = self.signer();
         self.open().await;
-
-        // Check num threads
         self.check_num_cores(args.threads);
 
-        // Start mining loop
         loop {
-            // Fetch proof
             let proof = get_proof_with_authority(&self.rpc_client, signer.pubkey()).await;
             println!(
                 "\nStake balance: {} ORE",
                 amount_u64_to_string(proof.balance)
             );
 
-            // Calc cutoff time
             let cutoff_time = self.get_cutoff(proof, args.buffer_time).await;
-
-            // Run drillx
             let config = get_config(&self.rpc_client).await;
             let solution = Self::find_hash_par(
                 proof,
@@ -62,7 +51,6 @@ impl Miner {
             )
             .await;
 
-            // Submit most difficult hash
             let mut compute_budget = 500_000;
             let mut ixs = vec![ore_api::instruction::auth(proof_pubkey(signer.pubkey()))];
             if self.should_reset(config).await {
@@ -88,7 +76,6 @@ impl Miner {
         threads: u64,
         min_difficulty: u32,
     ) -> Solution {
-        // Dispatch job to each thread
         let progress_bar = Arc::new(spinner::new_progress_bar());
         progress_bar.set_message("Mining...");
         let handles: Vec<_> = (0..threads)
@@ -104,7 +91,6 @@ impl Miner {
                         let mut best_difficulty = 0;
                         let mut best_hash = Hash::default();
                         loop {
-                            // Create hash
                             if let Ok(hx) = drillx::hash_with_memory(
                                 &mut memory,
                                 &proof.challenge,
@@ -118,11 +104,9 @@ impl Miner {
                                 }
                             }
 
-                            // Exit if time has elapsed
                             if nonce % 100 == 0 {
                                 if timer.elapsed().as_secs().ge(&cutoff_time) {
                                     if best_difficulty.gt(&min_difficulty) {
-                                        // Mine until min difficulty has been met
                                         break;
                                     }
                                 } else if i == 0 {
@@ -132,19 +116,14 @@ impl Miner {
                                     ));
                                 }
                             }
-
-                            // Increment nonce
                             nonce += 1;
                         }
-
-                        // Return the best nonce
                         (best_nonce, best_difficulty, best_hash)
                     }
                 })
             })
             .collect();
 
-        // Join handles and return best nonce
         let mut best_nonce = 0;
         let mut best_difficulty = 0;
         let mut best_hash = Hash::default();
@@ -158,7 +137,6 @@ impl Miner {
             }
         }
 
-        // Update log
         progress_bar.finish_with_message(format!(
             "Best hash: {} (difficulty: {})",
             bs58::encode(best_hash.h).into_string(),
@@ -189,12 +167,10 @@ impl Miner {
         let mut x_nonce = 0u64;
         let mut processed = 0;
     
-        // Shared state wrapped in Arc<Mutex<>>
         let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
     
         loop {
             unsafe {
-                // Use GPU for hashing
                 hash(
                     proof.challenge.as_ptr(),
                     &x_nonce as *const u64 as *const u8,
@@ -202,12 +178,10 @@ impl Miner {
                 );
             }
 
-            // Allocate memory for results
-            let mut digest = vec![0u8; x_batch_size as usize * 16]; // 16 bytes per solution
+            let mut digest = vec![0u8; x_batch_size as usize * 16];
             let mut sols = vec![0u32; x_batch_size as usize];
             
             unsafe {
-                // Use GPU for solving all stages
                 solve_all_stages(
                     hashes.as_ptr(),
                     digest.as_mut_ptr(),
@@ -216,7 +190,6 @@ impl Miner {
                 );
             }
             
-            // Parallel processing with Rayon
             let chunk_size = x_batch_size as usize / threads;
             let handles: Vec<(u64, u32, Hash)> = (0..threads).into_par_iter().map(|i| {
                 let start = i * chunk_size;
@@ -238,11 +211,9 @@ impl Miner {
                         }
                     }
                 }
-    
                 (best_nonce, best_difficulty, best_hash)
             }).collect();
     
-            // Lock the Mutex to update shared state
             {
                 let mut xbest = xbest.lock().unwrap();
                 let best_result = handles.into_iter().max_by_key(|&(_, diff, _)| diff).unwrap();
@@ -251,11 +222,9 @@ impl Miner {
                 }
             }
     
-            // Increment nonce for next batch
             x_nonce += x_batch_size as u64;
             processed += x_batch_size as usize;
     
-            // Update progress bar
             let elapsed = timer.elapsed().as_secs();
             let best_difficulty = {
                 let xbest = xbest.lock().unwrap();
@@ -277,7 +246,7 @@ impl Miner {
             }
         }
     
-        let final_best = xbest.lock().unwrap(); // Lock and get final best result
+        let final_best = xbest.lock().unwrap();
         progress_bar.finish_with_message(format!(
             "Best hash: {} (difficulty: {})",
             bs58::encode(final_best.2.h).into_string(),
@@ -288,7 +257,6 @@ impl Miner {
     }
 
     pub fn check_num_cores(&self, threads: u64) {
-        // Check num threads
         let num_cores = num_cpus::get() as u64;
         if threads.gt(&num_cores) {
             println!(
@@ -305,7 +273,7 @@ impl Miner {
         config
             .last_reset_at
             .saturating_add(EPOCH_DURATION)
-            .saturating_sub(5) // Buffer
+            .saturating_sub(5)
             .le(&clock.unix_timestamp)
     }
 
@@ -320,7 +288,6 @@ impl Miner {
     }
 }
 
-// TODO Pick a better strategy (avoid draining bus)
 fn find_bus() -> Pubkey {
     let i = rand::thread_rng().gen_range(0..BUS_COUNT);
     BUS_ADDRESSES[i]
