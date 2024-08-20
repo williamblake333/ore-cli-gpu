@@ -12,6 +12,7 @@
 #define HASHX_SALT HashX v1
 #endif
 
+// The definition remains here
 __device__ const blake2b_param hashx_blake2_params = {
     64, 0, 1, 1, 0, 0, 0, 0, { 0 }, STRINGIZE(HASHX_SALT), { 0 }
 };
